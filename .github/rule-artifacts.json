@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tools": {
-    "sing_box": "sing-box version 1.14.1"
+    "sing_box": "sing-box version 1.14.2"
   },
   "rule_sets": {
     "NodeSeek": {
