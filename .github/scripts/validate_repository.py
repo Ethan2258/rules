@@ -1,3 +1,5 @@
+"""Validate published rule sets, the artifact manifest and README links."""
+
 from __future__ import annotations
 
 import hashlib
@@ -5,7 +7,6 @@ import json
 import re
 import sys
 import zlib
-from compression import zstd
 from pathlib import Path
 from typing import Any
 
@@ -13,28 +14,31 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIG_FILES = tuple(sorted(ROOT.glob("*.yaml")))
-MRS_MAGIC = bytes.fromhex("28b52ffd")
-SRS_MAGIC = b"SRS"
+REPOSITORY = "Ethan2258/rules"
 MANIFEST_PATH = ROOT / ".github" / "rule-artifacts.json"
+README_PATH = ROOT / "README.md"
+SRS_MAGIC = b"SRS"
 EXPECTED_RULE_SETS = {
-    "NodeSeek": {"Nodeseek.yaml", "Nodeseek.mrs", "Nodeseek.srs"},
-    "WebRTC": {"Webrtc_domain.mrs", "Webrtc_domain.srs"},
-    "TelegramSG": {"TelegramSG.mrs", "TelegramSG.srs"},
-    "TelegramNL": {"TelegramNL.mrs", "TelegramNL.srs"},
+    "NodeSeek": ("domain", {"Nodeseek.yaml", "Nodeseek.srs"}),
+    "WebRTC": ("domain", {"Webrtc_domain.srs"}),
+    "TelegramSG": ("ipcidr", {"TelegramSG.srs"}),
+    "TelegramNL": ("ipcidr", {"TelegramNL.srs"}),
 }
-EXPECTED_RULE_KINDS = {
-    "NodeSeek": "domain",
-    "WebRTC": "domain",
-    "TelegramSG": "ipcidr",
-    "TelegramNL": "ipcidr",
+EGERN_RULE_SET_KEYS = {
+    "domain_suffix_set",
+    "domain_set",
+    "domain_keyword_set",
+    "domain_regex_set",
 }
-REPOSITORY_URL = re.compile(
-    r"https://(?:cdn|fastly|gcore)\.jsdelivr\.net/gh/Ethan2258/Ethan2258@main/"
-    r"(?P<path>[^\"'\s]+)",
-    re.IGNORECASE,
+REPOSITORY_FILE_URL = re.compile(
+    r"https://(?:raw\.githubusercontent\.com/" + re.escape(REPOSITORY) + r"/main"
+    r"|(?:cdn|fastly|gcore)\.jsdelivr\.net/gh/" + re.escape(REPOSITORY) + r"@main)"
+    r"/(?P<path>[^\s\"'`<>)]+)"
 )
-RULE_SET_REFERENCE = re.compile(r"RULE-SET,([^,)]+)")
+WORKFLOW_URL = re.compile(
+    r"https://github\.com/" + re.escape(REPOSITORY) + r"/actions/workflows/(?P<file>[\w.-]+)"
+)
+RELATIVE_LINK = re.compile(r"\]\((?!https?://|#)(?P<path>[^)\s]+)\)")
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -78,125 +82,66 @@ def load_yaml(path: Path, errors: list[str]) -> Any:
         return None
 
 
-def validate_rule_references(path: Path, config: Any, errors: list[str]) -> None:
-    if not isinstance(config, dict):
-        errors.append(f"{relative(path)}: expected a top-level mapping")
-        return
-
-    providers = set(config.get("rule-providers", {}))
-    references: set[str] = set()
-
-    for rule in config.get("rules", []):
-        if isinstance(rule, str):
-            references.update(RULE_SET_REFERENCE.findall(rule))
-
-    dns = config.get("dns", {})
-    for rule in dns.get("fake-ip-filter", []):
-        if isinstance(rule, str):
-            references.update(RULE_SET_REFERENCE.findall(rule))
-
-    for policy in dns.get("nameserver-policy", {}):
-        if isinstance(policy, str) and policy.startswith("rule-set:"):
-            references.update(name.strip() for name in policy[9:].split(","))
-
-    missing = sorted(references - providers)
-    if missing:
+def validate_egern_rule_set(path: Path, config: Any, errors: list[str]) -> None:
+    if not isinstance(config, dict) or not config or not set(config) <= EGERN_RULE_SET_KEYS:
         errors.append(
-            f"{relative(path)}: undefined rule providers: {', '.join(missing)}"
-        )
-
-
-def validate_repository_urls(path: Path, errors: list[str]) -> None:
-    text = path.read_text(encoding="utf-8")
-    for match in REPOSITORY_URL.finditer(text):
-        target = ROOT / match.group("path")
-        if not target.is_file():
-            errors.append(
-                f"{relative(path)}: repository URL points to missing file "
-                f"{match.group('path')}"
-            )
-
-
-def validate_domain_set(path: Path, config: Any, errors: list[str]) -> None:
-    valid_keys = {"domain_suffix_set", "domain_set", "domain_keyword_set", "domain_regex_set"}
-    if not isinstance(config, dict) or not set(config).issubset(valid_keys) or not set(config):
-        errors.append(
-            f"{relative(path)}: expected only valid Egern domain set keys ({', '.join(sorted(valid_keys))})"
+            f"{relative(path)}: expected only Egern domain set keys "
+            f"({', '.join(sorted(EGERN_RULE_SET_KEYS))})"
         )
         return
 
     for key, items in config.items():
         if not isinstance(items, list) or not items:
             errors.append(f"{relative(path)}: {key} must be a non-empty list")
-            continue
-        invalid_entries = [
-            entry for entry in items if not isinstance(entry, str) or not entry
-        ]
-        if invalid_entries:
+        elif not all(isinstance(entry, str) and entry for entry in items):
             errors.append(f"{relative(path)}: {key} entries must be non-empty strings")
         elif len(items) != len(set(items)):
             errors.append(f"{relative(path)}: {key} contains duplicate entries")
 
 
-def validate_mrs_files(errors: list[str]) -> None:
-    for path in sorted(ROOT.glob("*.mrs")):
-        if path.stat().st_size <= len(MRS_MAGIC):
-            errors.append(f"{relative(path)}: file is empty or truncated")
-            continue
-        if path.read_bytes()[:4] != MRS_MAGIC:
-            errors.append(f"{relative(path)}: invalid MRS/Zstandard header")
-            continue
-        try:
-            payload = zstd.decompress(path.read_bytes())
-        except Exception as error:
-            errors.append(f"{relative(path)}: invalid MRS/Zstandard stream: {error}")
-            continue
-        if not payload:
-            errors.append(f"{relative(path)}: empty MRS payload")
-
-
-def validate_srs_files(errors: list[str]) -> None:
-    for path in sorted(ROOT.glob("*.srs")):
-        if path.stat().st_size <= len(SRS_MAGIC):
-            errors.append(f"{relative(path)}: file is empty or truncated")
-            continue
+def validate_srs_files(errors: list[str]) -> int:
+    paths = sorted(ROOT.glob("*.srs"))
+    for path in paths:
         data = path.read_bytes()
+        if len(data) <= len(SRS_MAGIC) + 1:
+            errors.append(f"{relative(path)}: file is empty or truncated")
+            continue
         if data[:3] != SRS_MAGIC:
-            errors.append(f"{relative(path)}: invalid Sing-box SRS header")
+            errors.append(f"{relative(path)}: invalid sing-box SRS header")
             continue
         if data[3] == 0:
-            errors.append(f"{relative(path)}: invalid Sing-box SRS version")
+            errors.append(f"{relative(path)}: invalid sing-box SRS version")
             continue
         try:
             payload = zlib.decompress(data[4:])
         except zlib.error as error:
-            errors.append(f"{relative(path)}: invalid Sing-box SRS stream: {error}")
+            errors.append(f"{relative(path)}: invalid sing-box SRS stream: {error}")
             continue
         if not payload:
-            errors.append(f"{relative(path)}: empty Sing-box SRS payload")
+            errors.append(f"{relative(path)}: empty sing-box SRS payload")
+    return len(paths)
 
 
-def validate_artifact_manifest(errors: list[str]) -> None:
+def validate_artifact_manifest(errors: list[str]) -> set[str]:
+    """Check the manifest against the published files and return the files it lists."""
     try:
         manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         errors.append(f"{relative(MANIFEST_PATH)}: {error}")
-        return
+        return set()
     if not isinstance(manifest, dict) or manifest.get("schema") != 1:
         errors.append(f"{relative(MANIFEST_PATH)}: expected manifest schema 1")
-        return
+        return set()
     tools = manifest.get("tools")
-    if not isinstance(tools, dict) or not all(
-        isinstance(tools.get(name), str) and tools[name]
-        for name in ("mihomo", "sing_box")
-    ):
-        errors.append(f"{relative(MANIFEST_PATH)}: missing compiler versions")
+    if not isinstance(tools, dict) or not isinstance(tools.get("sing_box"), str) or not tools["sing_box"]:
+        errors.append(f"{relative(MANIFEST_PATH)}: missing sing-box compiler version")
     rule_sets = manifest.get("rule_sets")
     if not isinstance(rule_sets, dict) or set(rule_sets) != set(EXPECTED_RULE_SETS):
         errors.append(f"{relative(MANIFEST_PATH)}: unexpected rule-set inventory")
-        return
+        return set()
+
     manifest_files: set[str] = set()
-    for name, expected_files in EXPECTED_RULE_SETS.items():
+    for name, (expected_kind, expected_files) in EXPECTED_RULE_SETS.items():
         entry = rule_sets[name]
         if (
             not isinstance(entry, dict)
@@ -205,7 +150,7 @@ def validate_artifact_manifest(errors: list[str]) -> None:
         ):
             errors.append(f"{relative(MANIFEST_PATH)}: invalid rule count for {name}")
             continue
-        if entry.get("kind") != EXPECTED_RULE_KINDS[name]:
+        if entry.get("kind") != expected_kind:
             errors.append(f"{relative(MANIFEST_PATH)}: invalid rule kind for {name}")
         files = entry.get("files")
         if not isinstance(files, dict) or set(files) != expected_files:
@@ -224,50 +169,57 @@ def validate_artifact_manifest(errors: list[str]) -> None:
                 errors.append(f"{filename}: size does not match artifact manifest")
             if expected_hash != hashlib.sha256(data).hexdigest():
                 errors.append(f"{filename}: SHA-256 does not match artifact manifest")
-    binary_files = {
-        path.name
-        for pattern in ("*.mrs", "*.srs")
-        for path in ROOT.glob(pattern)
-    }
-    manifest_binary_files = {
-        filename
-        for filename in manifest_files
-        if Path(filename).suffix in {".mrs", ".srs"}
-    }
-    if binary_files != manifest_binary_files:
-        unexpected = sorted(binary_files - manifest_binary_files)
-        missing = sorted(manifest_binary_files - binary_files)
-        if unexpected:
-            errors.append(
-                f"{relative(MANIFEST_PATH)}: unlisted binary artifacts: "
-                f"{', '.join(unexpected)}"
-            )
-        if missing:
-            errors.append(
-                f"{relative(MANIFEST_PATH)}: listed binary artifacts are missing: "
-                f"{', '.join(missing)}"
-            )
+
+    published = {path.name for pattern in ("*.srs", "*.yaml") for path in ROOT.glob(pattern)}
+    unlisted = sorted(published - manifest_files)
+    if unlisted:
+        errors.append(
+            f"{relative(MANIFEST_PATH)}: unlisted rule-set files: {', '.join(unlisted)}"
+        )
+    return manifest_files
+
+
+def validate_readme(manifest_files: set[str], errors: list[str]) -> None:
+    try:
+        text = README_PATH.read_text(encoding="utf-8")
+    except OSError as error:
+        errors.append(f"README.md: {error}")
+        return
+
+    linked = {match.group("path") for match in REPOSITORY_FILE_URL.finditer(text)}
+    for path in sorted(linked):
+        if not (ROOT / path).is_file():
+            errors.append(f"README.md: link points to missing file {path}")
+    workflows = {match.group("file") for match in WORKFLOW_URL.finditer(text)}
+    for workflow in sorted(workflows):
+        if not (ROOT / ".github" / "workflows" / workflow).is_file():
+            errors.append(f"README.md: link points to missing workflow {workflow}")
+    relative_paths = {match.group("path").split("#", 1)[0] for match in RELATIVE_LINK.finditer(text)}
+    for path in sorted(relative_paths - {""}):
+        if not (ROOT / path).exists():
+            errors.append(f"README.md: relative link points to missing path {path}")
+
+    # Keeping every published file in the README catches download tables that drift.
+    unlinked = sorted(manifest_files - linked)
+    if unlinked:
+        errors.append(f"README.md: missing download links for {', '.join(unlinked)}")
 
 
 def main() -> int:
     errors: list[str] = []
-    yaml_files = sorted(ROOT.glob("*.yaml")) + sorted(
-        (ROOT / ".github" / "workflows").glob("*.yml")
-    )
+    rule_set_files = sorted(ROOT.glob("*.yaml"))
+    workflow_files = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 
-    loaded = {path: load_yaml(path, errors) for path in yaml_files}
-    for path in CONFIG_FILES:
-        config = loaded.get(path)
-        if path.name == "Nodeseek.yaml":
-            validate_domain_set(path, config, errors)
-        if isinstance(config, dict) and any(
-            key in config for key in ("rule-providers", "rules", "dns")
-        ):
-            validate_rule_references(path, config, errors)
-        validate_repository_urls(path, errors)
-    validate_mrs_files(errors)
-    validate_srs_files(errors)
-    validate_artifact_manifest(errors)
+    for path in rule_set_files:
+        loaded_errors = len(errors)
+        config = load_yaml(path, errors)
+        if len(errors) == loaded_errors:
+            validate_egern_rule_set(path, config, errors)
+    for path in workflow_files:
+        load_yaml(path, errors)
+    srs_count = validate_srs_files(errors)
+    manifest_files = validate_artifact_manifest(errors)
+    validate_readme(manifest_files, errors)
 
     if errors:
         print("Repository validation failed:", file=sys.stderr)
@@ -276,10 +228,8 @@ def main() -> int:
         return 1
 
     print(
-        f"Validated {len(yaml_files)} YAML files, "
-        f"{len(CONFIG_FILES)} Mihomo configs, and "
-        f"{len(list(ROOT.glob('*.mrs')))} MRS files, and "
-        f"{len(list(ROOT.glob('*.srs')))} SRS files."
+        f"Validated {len(rule_set_files)} Egern rule sets, {srs_count} SRS files, "
+        f"{len(workflow_files)} workflows, the artifact manifest and README links."
     )
     return 0
 
