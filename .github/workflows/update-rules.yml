@@ -1,0 +1,66 @@
+name: Update rules
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/update-rules.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .github/requirements.txt
+
+      - name: Generate rule sets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/update_rules.py
+
+      - name: Validate generated files
+        run: |
+          python -m pip install --disable-pip-version-check --requirement .github/requirements.txt
+          python .github/scripts/validate_repository.py
+
+      - name: Show generated changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git status --short
+          git diff -- .github/rule-artifacts.json
+
+      - name: Commit updated rule sets
+        if: github.event_name != 'pull_request'
+        run: |
+          mapfile -t files < <(jq -r '.rule_sets[].files | keys[]' .github/rule-artifacts.json)
+          files+=(.github/rule-artifacts.json)
+          if [ -z "$(git status --porcelain -- "${files[@]}")" ]; then
+            echo "Generated rule files are already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- "${files[@]}"
+          git commit -m "chore: update generated rule files"
+          git push
