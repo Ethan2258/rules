@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: pip
+    directory: /.github
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore

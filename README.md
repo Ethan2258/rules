@@ -73,6 +73,10 @@ rules:
 - 规则会先规范化、去重；遇到非法记录、规则数过少、网段越界或冲突时中止更新，保留上一版。
 - SRS 由最新版 sing-box 编译后反向解码核对；[验证工作流](https://github.com/Ethan2258/rules/actions/workflows/validate.yml)检查 YAML、SRS、产物清单和 README 链接。
 
+## 许可
+
+脚本和工作流以 [GPL-3.0](LICENSE) 发布。规则数据来自上游，版权归原作者：[MetaCubeX/meta-rules-dat](https://github.com/MetaCubeX/meta-rules-dat)（GPL-3.0）、[MeALiYeYe/ProxyConfigFiles](https://github.com/MeALiYeYe/ProxyConfigFiles)、[Kelee](https://kelee.one) 及其镜像，Telegram 网段核验使用 [Telegram 官方 CIDR](https://core.telegram.org/resources/cidr.txt)。
+
 ## 图标
 
 NodeSeek：[SVG](nodeseek.svg) · [PNG](nodeseek.png)
