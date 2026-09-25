@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import re
 import sys
@@ -21,15 +22,25 @@ UPDATE_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "update-rules.yml"
 SRS_MAGIC = b"SRS"
 EXPECTED_RULE_SETS = {
     "NodeSeek": ("domain", {"Nodeseek.yaml", "Nodeseek.srs"}),
-    "WebRTC": ("domain", {"Webrtc_domain.srs"}),
-    "TelegramSG": ("ipcidr", {"TelegramSG.srs"}),
-    "TelegramNL": ("ipcidr", {"TelegramNL.srs"}),
+    "WebRTC": ("domain", {"Webrtc_domain.yaml", "Webrtc_domain.srs"}),
+    "TelegramSG": ("ipcidr", {"TelegramSG.yaml", "TelegramSG.srs"}),
+    "TelegramNL": ("ipcidr", {"TelegramNL.yaml", "TelegramNL.srs"}),
 }
 EGERN_RULE_SET_KEYS = {
-    "domain_suffix_set",
-    "domain_set",
-    "domain_keyword_set",
-    "domain_regex_set",
+    "domain": {
+        "domain_suffix_set",
+        "domain_set",
+        "domain_keyword_set",
+        "domain_regex_set",
+    },
+    "ipcidr": {"ip_cidr_set", "ip_cidr6_set"},
+}
+EGERN_IP_VERSIONS = {"ip_cidr_set": 4, "ip_cidr6_set": 6}
+EGERN_FILE_KINDS = {
+    filename: kind
+    for kind, files in EXPECTED_RULE_SETS.values()
+    for filename in files
+    if filename.endswith(".yaml")
 }
 REPOSITORY_FILE_URL = re.compile(
     r"https://(?:raw\.githubusercontent\.com/" + re.escape(REPOSITORY) + r"/main"
@@ -84,14 +95,23 @@ def load_yaml(path: Path, errors: list[str]) -> Any:
         return None
 
 
-def validate_egern_rule_set(path: Path, config: Any, errors: list[str]) -> None:
-    if not isinstance(config, dict) or not config or not set(config) <= EGERN_RULE_SET_KEYS:
+def validate_egern_rule_set(path: Path, config: Any, errors: list[str]) -> int:
+    """Check an Egern rule set against its manifest kind and return its rule count."""
+    kind = EGERN_FILE_KINDS.get(path.name)
+    allowed = EGERN_RULE_SET_KEYS.get(kind, set().union(*EGERN_RULE_SET_KEYS.values()))
+    if isinstance(config, dict) and kind == "ipcidr":
+        # sing-box ip_cidr rule sets never resolve domains, so the Egern files must not either.
+        if config.get("no_resolve") is not True:
+            errors.append(f"{relative(path)}: IP rule sets must set no_resolve: true")
+        config = {key: value for key, value in config.items() if key != "no_resolve"}
+    if not isinstance(config, dict) or not config or not set(config) <= allowed:
         errors.append(
-            f"{relative(path)}: expected only Egern domain set keys "
-            f"({', '.join(sorted(EGERN_RULE_SET_KEYS))})"
+            f"{relative(path)}: expected only Egern {kind or 'rule'} set keys "
+            f"({', '.join(sorted(allowed))})"
         )
-        return
+        return 0
 
+    count = 0
     for key, items in config.items():
         if not isinstance(items, list) or not items:
             errors.append(f"{relative(path)}: {key} must be a non-empty list")
@@ -99,6 +119,17 @@ def validate_egern_rule_set(path: Path, config: Any, errors: list[str]) -> None:
             errors.append(f"{relative(path)}: {key} entries must be non-empty strings")
         elif len(items) != len(set(items)):
             errors.append(f"{relative(path)}: {key} contains duplicate entries")
+        else:
+            count += len(items)
+            version = EGERN_IP_VERSIONS.get(key)
+            for entry in items if version else ():
+                try:
+                    network = ipaddress.ip_network(entry, strict=True)
+                except ValueError:
+                    network = None
+                if network is None or network.version != version:
+                    errors.append(f"{relative(path)}: {key} contains invalid network {entry!r}")
+    return count
 
 
 def validate_srs_files(errors: list[str]) -> int:
@@ -124,7 +155,7 @@ def validate_srs_files(errors: list[str]) -> int:
     return len(paths)
 
 
-def validate_artifact_manifest(errors: list[str]) -> set[str]:
+def validate_artifact_manifest(egern_counts: dict[str, int], errors: list[str]) -> set[str]:
     """Check the manifest against the published files and return the files it lists."""
     try:
         manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
@@ -159,6 +190,12 @@ def validate_artifact_manifest(errors: list[str]) -> set[str]:
             errors.append(f"{relative(MANIFEST_PATH)}: invalid file inventory for {name}")
             continue
         manifest_files.update(files)
+        for filename in sorted(files):
+            if filename in egern_counts and egern_counts[filename] != entry["rules"]:
+                errors.append(
+                    f"{filename}: {egern_counts[filename]} rules, but the artifact manifest "
+                    f"lists {entry['rules']} for {name}"
+                )
         for filename, metadata in files.items():
             artifact = ROOT / filename
             if not artifact.is_file():
@@ -239,15 +276,18 @@ def main() -> int:
     rule_set_files = sorted(ROOT.glob("*.yaml"))
     workflow_files = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 
+    egern_counts: dict[str, int] = {}
     for path in rule_set_files:
         loaded_errors = len(errors)
         config = load_yaml(path, errors)
         if len(errors) == loaded_errors:
-            validate_egern_rule_set(path, config, errors)
+            count = validate_egern_rule_set(path, config, errors)
+            if len(errors) == loaded_errors:
+                egern_counts[path.name] = count
     for path in workflow_files:
         load_yaml(path, errors)
     srs_count = validate_srs_files(errors)
-    manifest_files = validate_artifact_manifest(errors)
+    manifest_files = validate_artifact_manifest(egern_counts, errors)
     validate_readme(manifest_files, errors)
 
     if errors:
