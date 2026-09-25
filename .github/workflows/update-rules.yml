@@ -54,6 +54,7 @@ jobs:
           git diff -- .github/rule-artifacts.json
 
       - name: Commit updated rule sets
+        id: commit
         if: github.event_name != 'pull_request'
         run: |
           mapfile -t files < <(jq -r '.rule_sets[].files | keys[]' .github/rule-artifacts.json)
@@ -65,6 +66,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- "${files[@]}"
+          # Read by the purge step, which only runs once this step (and the push) succeeds.
+          echo "changed=$(git diff --cached --name-only | paste -sd ' ')" >> "$GITHUB_OUTPUT"
           git commit -m "chore: update generated rule files"
           # main may have moved while the rules were being built.
           for attempt in 1 2 3; do
@@ -73,3 +76,22 @@ jobs:
             git pull --rebase --quiet
           done
           git push
+
+      # jsDelivr caches branch files for up to 12 hours; purge what just changed so
+      # clients pulling through the CDN get the new rules on their next refresh.
+      - name: Purge jsDelivr cache
+        if: steps.commit.outputs.changed != ''
+        env:
+          CHANGED: ${{ steps.commit.outputs.changed }}
+          CDN_PATH: gh/${{ github.repository }}@${{ github.ref_name }}
+        run: |
+          for file in $CHANGED; do
+            url="https://purge.jsdelivr.net/$CDN_PATH/$file"
+            if ! response="$(curl -fsS --retry 3 --retry-all-errors --max-time 30 "$url")"; then
+              echo "::warning::jsDelivr purge failed for $file"
+            elif jq -e '[.paths[]?.throttled] | any' <<< "$response" > /dev/null; then
+              echo "::warning::jsDelivr throttled the purge for $file"
+            else
+              echo "Purged $file"
+            fi
+          done

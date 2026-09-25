@@ -14,7 +14,7 @@
 | Telegram SG | Telegram 新加坡网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.yaml) |
 | Telegram NL | Telegram 荷兰网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramNL.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramNL.yaml) |
 
-规则数、文件大小和 SHA-256 见[产物清单](.github/rule-artifacts.json)。无法直连 GitHub 时，可把链接前缀换成 `https://cdn.jsdelivr.net/gh/Ethan2258/rules@main/`（CDN 有缓存，更新会稍有延迟）。
+规则数、文件大小和 SHA-256 见[产物清单](.github/rule-artifacts.json)。无法直连 GitHub 时，可把链接前缀换成 `https://cdn.jsdelivr.net/gh/Ethan2258/rules@main/`（规则有变化时工作流会主动刷新 jsDelivr 缓存，通常几分钟内就能拿到新版）。
 
 ## sing-box
 
