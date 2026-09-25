@@ -22,6 +22,10 @@
       "kind": "domain",
       "rules": 27,
       "files": {
+        "Webrtc_domain.yaml": {
+          "size": 634,
+          "sha256": "3290599f22451d24c7c24ae0815bc6c817b84bcaf89774a8de5b1841af4ddce3"
+        },
         "Webrtc_domain.srs": {
           "size": 351,
           "sha256": "94fc7f445f99dc9f7f3039db60ae09b2a6d97e8dadb99bd92c4c9fd2447d2bd5"
@@ -32,6 +36,10 @@
       "kind": "ipcidr",
       "rules": 3,
       "files": {
+        "TelegramSG.yaml": {
+          "size": 105,
+          "sha256": "3f5f9cbb097fec0ccdef5f2886729b9a7d0db55403fd8c6b769b41bcf3dec0c2"
+        },
         "TelegramSG.srs": {
           "size": 57,
           "sha256": "56d23f70a7d0c1fc5c7664200a93bd94c8ce4935c7f86cea8a3f719ff216bf73"
@@ -42,6 +50,10 @@
       "kind": "ipcidr",
       "rules": 5,
       "files": {
+        "TelegramNL.yaml": {
+          "size": 146,
+          "sha256": "2546ce7df8e1371a37a147cf93bc7563dbc514c2223194f3d92608302854571c"
+        },
         "TelegramNL.srs": {
           "size": 74,
           "sha256": "1410d389de52b37424d7d7f95995b0bc53b8d39d7b0fe3f0657c886495f10ae5"

@@ -10,9 +10,9 @@
 | 规则集 | 内容 | 类型 | sing-box | Egern |
 | --- | --- | --- | --- | --- |
 | NodeSeek | NodeSeek 相关域名 | 域名 | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/Nodeseek.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/Nodeseek.yaml) |
-| WebRTC | WebRTC STUN/TURN 服务器域名 | 域名 | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/Webrtc_domain.srs) | - |
-| Telegram SG | Telegram 新加坡网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.srs) | - |
-| Telegram NL | Telegram 荷兰网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramNL.srs) | - |
+| WebRTC | WebRTC STUN/TURN 服务器域名 | 域名 | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/Webrtc_domain.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/Webrtc_domain.yaml) |
+| Telegram SG | Telegram 新加坡网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.yaml) |
+| Telegram NL | Telegram 荷兰网段 | IP | [SRS](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramNL.srs) | [YAML](https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramNL.yaml) |
 
 规则数、文件大小和 SHA-256 见[产物清单](.github/rule-artifacts.json)。无法直连 GitHub 时，可把链接前缀换成 `https://cdn.jsdelivr.net/gh/Ethan2258/rules@main/`（CDN 有缓存，更新会稍有延迟）。
 
@@ -62,9 +62,13 @@ rules:
       match: https://raw.githubusercontent.com/Ethan2258/rules/main/Nodeseek.yaml
       policy: DIRECT
       update_interval: 10800
+  - rule_set:
+      match: https://raw.githubusercontent.com/Ethan2258/rules/main/TelegramSG.yaml
+      policy: PROXY
+      update_interval: 10800
 ```
 
-`policy` 换成需要的策略（如 `DIRECT` 或 `PROXY`）。
+`policy` 换成需要的策略（如 `DIRECT` 或 `PROXY`）。Telegram 的 IP 规则集自带 `no_resolve: true`，匹配时不会触发 DNS 解析，与 sing-box 的行为一致。
 
 ## 更新机制
 

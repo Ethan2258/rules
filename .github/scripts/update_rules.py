@@ -62,15 +62,15 @@ RULE_ARTIFACTS = {
     },
     "WebRTC": {
         "kind": "domain",
-        "files": ("Webrtc_domain.srs",),
+        "files": ("Webrtc_domain.yaml", "Webrtc_domain.srs"),
     },
     "TelegramSG": {
         "kind": "ipcidr",
-        "files": ("TelegramSG.srs",),
+        "files": ("TelegramSG.yaml", "TelegramSG.srs"),
     },
     "TelegramNL": {
         "kind": "ipcidr",
-        "files": ("TelegramNL.srs",),
+        "files": ("TelegramNL.yaml", "TelegramNL.srs"),
     },
 }
 
@@ -150,6 +150,8 @@ def parse_lsr_records(data: bytes, kind: str) -> Records:
         if len(fields) < 2:
             raise ValueError(f"line {line_number}: expected a rule with a value")
         rule_type, value = fields[0].upper(), fields[1]
+        # HOST is Loon's name for DOMAIN; folding it keeps duplicates out of every output.
+        rule_type = {"HOST": "DOMAIN", "HOST-SUFFIX": "DOMAIN-SUFFIX"}.get(rule_type, rule_type)
         if rule_type not in known_types:
             raise ValueError(f"line {line_number}: unsupported rule type {rule_type}")
         if rule_type not in accepted:
@@ -490,17 +492,37 @@ def records_to_srs_rules(records: Records, kind: str) -> list[dict[str, list[str
     return [rule]
 
 
-def records_to_egern_yaml(records: Records) -> str:
-    domain_suffixes = [val for r_type, val in records if r_type in {"DOMAIN-SUFFIX", "HOST-SUFFIX"}]
-    domains = [val for r_type, val in records if r_type in {"DOMAIN", "HOST"}]
-    lines: list[str] = []
-    if domain_suffixes:
-        lines.append("domain_suffix_set:")
-        lines.extend(f"  - {item}" for item in sorted(set(domain_suffixes)))
-    if domains:
-        lines.append("domain_set:")
-        lines.extend(f"  - {item}" for item in sorted(set(domains)))
+EGERN_KEYS = (
+    ("domain_suffix_set", {"DOMAIN-SUFFIX", "HOST-SUFFIX"}),
+    ("domain_set", {"DOMAIN", "HOST"}),
+    ("domain_keyword_set", {"DOMAIN-KEYWORD"}),
+    ("ip_cidr_set", {"IP-CIDR"}),
+    ("ip_cidr6_set", {"IP-CIDR6"}),
+)
+
+
+def records_to_egern_yaml(records: Records, kind: str) -> str:
+    known_types = set().union(*(types for _, types in EGERN_KEYS))
+    unsupported = sorted({rule_type for rule_type, _ in records} - known_types)
+    if unsupported:
+        raise ValueError(f"{', '.join(unsupported)} cannot be represented by an Egern rule set")
+    # Like sing-box ip_cidr rule sets, IP rule sets never trigger a DNS lookup.
+    lines: list[str] = ["no_resolve: true"] if kind == "ipcidr" else []
+    for key, types in EGERN_KEYS:
+        values = sorted({value for rule_type, value in records if rule_type in types})
+        if values:
+            lines.append(f"{key}:")
+            lines.extend(f"  - {value}" for value in values)
+    if len(lines) == (1 if kind == "ipcidr" else 0):
+        raise ValueError("source contains no rules for an Egern rule set")
     return "\n".join(lines) + "\n"
+
+
+def build_egern(records: Records, kind: str, output: str, workspace: Path) -> Path:
+    path = workspace / output
+    # Bytes keep LF line endings on every platform, which keeps the SHA-256 stable.
+    path.write_bytes(records_to_egern_yaml(records, kind).encode("utf-8"))
+    return path
 
 
 def build_srs(singbox: Path, records: Records, kind: str, output: str, workspace: Path) -> Path:
@@ -518,9 +540,7 @@ def build_nodeseek(singbox: Path, workspace: Path) -> tuple[int, list[Path]]:
         MIN_NODESEEK_RULES,
     )
     srs_output = build_srs(singbox, records, "domain", "Nodeseek.srs", workspace)
-    yaml_output = workspace / "Nodeseek.yaml"
-    # Bytes keep LF line endings on every platform, which keeps the SHA-256 stable.
-    yaml_output.write_bytes(records_to_egern_yaml(records).encode("utf-8"))
+    yaml_output = build_egern(records, "domain", "Nodeseek.yaml", workspace)
     print(f"NodeSeek: {len(records)} rules from {used_url}")
     return len(records), [yaml_output, srs_output]
 
@@ -536,6 +556,12 @@ def preserve_existing_srs(
         raise RuntimeError(
             f"{filename}: sources are unavailable and no valid existing SRS is present: "
             f"{download_error}"
+        )
+    companion = existing.with_suffix(".yaml")
+    if not companion.is_file():
+        raise RuntimeError(
+            f"{companion.name}: sources are unavailable and no existing Egern rule set "
+            f"is present: {download_error}"
         )
     count = rule_count(
         decompile_srs(singbox, existing, workspace / f"{filename}.existing.json")
@@ -557,8 +583,9 @@ def build_webrtc(singbox: Path, workspace: Path) -> tuple[int, list[Path]]:
     except RuntimeError as error:
         return preserve_existing_srs(singbox, "Webrtc_domain.srs", workspace, error), []
     srs_output = build_srs(singbox, records, "domain", "Webrtc_domain.srs", workspace)
+    yaml_output = build_egern(records, "domain", "Webrtc_domain.yaml", workspace)
     print(f"WebRTC: {len(records)} rules from {used_url}")
-    return len(records), [srs_output]
+    return len(records), [yaml_output, srs_output]
 
 
 def build_telegram(singbox: Path, workspace: Path) -> dict[str, tuple[int, list[Path]]]:
@@ -573,8 +600,9 @@ def build_telegram(singbox: Path, workspace: Path) -> dict[str, tuple[int, list[
         records, used_url = download_records(urls, lambda data: parse_lsr_records(data, "ipcidr"))
         networks[name] = validate_telegram_records(name, records, official)
         srs_output = build_srs(singbox, records, "ipcidr", f"{name}.srs", workspace)
+        yaml_output = build_egern(records, "ipcidr", f"{name}.yaml", workspace)
         print(f"{name}: {len(records)} rules from {used_url}")
-        results[name] = (len(records), [srs_output])
+        results[name] = (len(records), [yaml_output, srs_output])
     overlap = [
         (left, right)
         for left in networks["TelegramSG"]
