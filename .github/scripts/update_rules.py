@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -599,7 +600,8 @@ def main() -> int:
         # Every rule set is built and verified before any tracked file changes.
         for _, artifacts in results.values():
             for artifact in artifacts:
-                artifact.replace(ROOT / artifact.name)
+                # The temporary directory can sit on another filesystem.
+                shutil.move(artifact, ROOT / artifact.name)
         write_artifact_manifest(
             {name: count for name, (count, _) in results.items()},
             version,

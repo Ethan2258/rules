@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REPOSITORY = "Ethan2258/rules"
 MANIFEST_PATH = ROOT / ".github" / "rule-artifacts.json"
 README_PATH = ROOT / "README.md"
+UPDATE_WORKFLOW_PATH = ROOT / ".github" / "workflows" / "update-rules.yml"
 SRS_MAGIC = b"SRS"
 EXPECTED_RULE_SETS = {
     "NodeSeek": ("domain", {"Nodeseek.yaml", "Nodeseek.srs"}),
@@ -39,6 +40,7 @@ WORKFLOW_URL = re.compile(
     r"https://github\.com/" + re.escape(REPOSITORY) + r"/actions/workflows/(?P<file>[\w.-]+)"
 )
 RELATIVE_LINK = re.compile(r"\]\((?!https?://|#)(?P<path>[^)\s]+)\)")
+HOURLY_CRON = re.compile(r"^\d{1,2} (?P<hours>\*|\*/(?P<step>\d+)) \* \* \*$")
 
 
 class UniqueKeyLoader(yaml.SafeLoader):
@@ -179,12 +181,39 @@ def validate_artifact_manifest(errors: list[str]) -> set[str]:
     return manifest_files
 
 
+def update_schedule_phrase(errors: list[str]) -> str | None:
+    """Return how README.md must describe the update workflow's schedule."""
+    workflow = load_yaml(UPDATE_WORKFLOW_PATH, errors)
+    if not isinstance(workflow, dict):
+        return None
+    # PyYAML reads the bare `on` key as the boolean True.
+    triggers = workflow.get("on", workflow.get(True))
+    schedule = triggers.get("schedule") if isinstance(triggers, dict) else None
+    crons = [entry.get("cron") for entry in schedule or [] if isinstance(entry, dict)]
+    match = HOURLY_CRON.fullmatch(crons[0]) if len(crons) == 1 and isinstance(crons[0], str) else None
+    if not match:
+        errors.append(
+            f"{relative(UPDATE_WORKFLOW_PATH)}: expected one hourly or every-N-hours cron "
+            "so README.md can state the update frequency"
+        )
+        return None
+    step = int(match.group("step") or 1)
+    return "每小时" if step == 1 else f"每 {step} 小时"
+
+
 def validate_readme(manifest_files: set[str], errors: list[str]) -> None:
     try:
         text = README_PATH.read_text(encoding="utf-8")
     except OSError as error:
         errors.append(f"README.md: {error}")
         return
+
+    schedule = update_schedule_phrase(errors)
+    if schedule and f"{schedule}自动检查上游" not in text:
+        errors.append(
+            f"README.md: update frequency must read “{schedule}自动检查上游” "
+            "to match the workflow cron"
+        )
 
     linked = {match.group("path") for match in REPOSITORY_FILE_URL.finditer(text)}
     for path in sorted(linked):

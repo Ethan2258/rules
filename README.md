@@ -3,7 +3,7 @@
 [![Update rules](https://github.com/Ethan2258/rules/actions/workflows/update-rules.yml/badge.svg)](https://github.com/Ethan2258/rules/actions/workflows/update-rules.yml)
 [![Validate repository](https://github.com/Ethan2258/rules/actions/workflows/validate.yml/badge.svg)](https://github.com/Ethan2258/rules/actions/workflows/validate.yml)
 
-为 sing-box 和 Egern 自动维护的精简规则集，每 3 小时同步一次上游。
+为 sing-box 和 Egern 自动维护的精简规则集，每小时检查一次上游更新。
 
 ## 规则集
 
@@ -68,7 +68,8 @@ rules:
 
 ## 更新机制
 
-- 每 3 小时自动检查上游，也可[手动运行](https://github.com/Ethan2258/rules/actions/workflows/update-rules.yml)；内容有变化时才会提交。
+- 每小时自动检查上游，也可[手动运行](https://github.com/Ethan2258/rules/actions/workflows/update-rules.yml)；内容有变化时才会提交。
+- GitHub 繁忙时会推迟甚至跳过定时任务，实际间隔可能长达几个小时；上游变动不频繁，客户端按 3 小时拉取即可。
 - 来源：NodeSeek 跟随 MetaCubeX，WebRTC 来自 MeALiYeYe，Telegram SG/NL 来自 Kelee 并对照 Telegram 官方 CIDR 核验。
 - 规则会先规范化、去重；遇到非法记录、规则数过少、网段越界或冲突时中止更新，保留上一版。
 - SRS 由最新版 sing-box 编译后反向解码核对；[验证工作流](https://github.com/Ethan2258/rules/actions/workflows/validate.yml)检查 YAML、SRS、产物清单和 README 链接。
