@@ -27,6 +27,8 @@ ROOT = Path(__file__).resolve().parents[2]
 USER_AGENT = "Ethan2258-rules-updater/1.0"
 SINGBOX_RELEASE_API = "https://api.github.com/repos/SagerNet/sing-box/releases/latest"
 SRS_MAGIC = b"SRS"
+# Version 1 used a legacy domain matcher; every later version shares one payload layout.
+SRS_MIN_PAYLOAD_VERSION = 2
 MIRROR_BRANCH = "Loon"
 FETCH_ATTEMPTS = 3
 DOMAIN_ENTRY = re.compile(r"^(?:[A-Za-z0-9_*-]+\.)+[A-Za-z0-9_*-]+$")
@@ -317,7 +319,7 @@ def validate_telegram_records(
     return networks
 
 
-def write_artifact_manifest(counts: dict[str, int], singbox: str) -> None:
+def write_artifact_manifest(counts: dict[str, int], singbox: str, srs_version: int) -> None:
     rule_sets = {}
     for name, specification in RULE_ARTIFACTS.items():
         if name not in counts:
@@ -340,6 +342,7 @@ def write_artifact_manifest(counts: dict[str, int], singbox: str) -> None:
     manifest = {
         "schema": 1,
         "tools": {"sing_box": singbox},
+        "srs_version": srs_version,
         "rule_sets": rule_sets,
     }
     (ROOT / ".github/rule-artifacts.json").write_text(
@@ -453,11 +456,17 @@ def compile_srs(binary: Path, rules: list[dict[str, list[str]]], output_path: Pa
     if not output_path.is_file() or output_path.read_bytes()[:3] != SRS_MAGIC:
         raise RuntimeError(f"{output_path.name}: compiler did not produce a valid SRS file")
     data = output_path.read_bytes()
-    if len(data) <= 4 or not 1 <= data[3] <= source_version:
+    if len(data) <= 4 or not SRS_MIN_PAYLOAD_VERSION <= data[3] <= source_version:
         raise RuntimeError(f"{output_path.name}: compiler produced an invalid SRS version")
+    compiled_version = data[3]
+    # The compiler lowers the header to the oldest version the rules need, but the
+    # payload is encoded the same way from v2 on (newer versions only add rule items,
+    # which the compiler rejects below their version). Stamping the latest version
+    # therefore yields the file a non-downgrading compiler would write.
+    output_path.write_bytes(data[:3] + bytes([source_version]) + data[4:])
     print(
-        f"{output_path.name}: latest source format v{source_version}, "
-        f"official compiler selected binary format v{data[3]}"
+        f"{output_path.name}: SRS format v{source_version} "
+        f"(compiler selected v{compiled_version})"
     )
 
 
@@ -550,7 +559,7 @@ def preserve_existing_srs(
     filename: str,
     workspace: Path,
     download_error: RuntimeError,
-) -> int:
+) -> tuple[int, list[Path]]:
     existing = ROOT / filename
     if not existing.is_file() or existing.read_bytes()[:3] != SRS_MAGIC:
         raise RuntimeError(
@@ -563,14 +572,20 @@ def preserve_existing_srs(
             f"{companion.name}: sources are unavailable and no existing Egern rule set "
             f"is present: {download_error}"
         )
-    count = rule_count(
-        decompile_srs(singbox, existing, workspace / f"{filename}.existing.json")
-    )
+    rules = decompile_srs(singbox, existing, workspace / f"{filename}.existing.json")
+    count = rule_count(rules)
     print(
         f"WARNING: {filename}: sources are unavailable; preserving {count} validated "
         f"existing rules: {download_error}"
     )
-    return count
+    data = existing.read_bytes()
+    if data[3] == current_srs_source_version(singbox):
+        return count, []
+    # Keep every published SRS on the latest format even while its source is down.
+    recompiled = workspace / filename
+    compile_srs(singbox, rules, recompiled)
+    verify_srs(singbox, recompiled, rules, workspace)
+    return count, [recompiled]
 
 
 def build_webrtc(singbox: Path, workspace: Path) -> tuple[int, list[Path]]:
@@ -581,7 +596,7 @@ def build_webrtc(singbox: Path, workspace: Path) -> tuple[int, list[Path]]:
             MIN_WEBRTC_RULES,
         )
     except RuntimeError as error:
-        return preserve_existing_srs(singbox, "Webrtc_domain.srs", workspace, error), []
+        return preserve_existing_srs(singbox, "Webrtc_domain.srs", workspace, error)
     srs_output = build_srs(singbox, records, "domain", "Webrtc_domain.srs", workspace)
     yaml_output = build_egern(records, "domain", "Webrtc_domain.yaml", workspace)
     print(f"WebRTC: {len(records)} rules from {used_url}")
@@ -633,6 +648,7 @@ def main() -> int:
         write_artifact_manifest(
             {name: count for name, (count, _) in results.items()},
             version,
+            current_srs_source_version(singbox),
         )
     return 0
 

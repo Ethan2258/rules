@@ -3,6 +3,7 @@
   "tools": {
     "sing_box": "sing-box version 1.14.2"
   },
+  "srs_version": 5,
   "rule_sets": {
     "NodeSeek": {
       "kind": "domain",
@@ -14,7 +15,7 @@
         },
         "Nodeseek.srs": {
           "size": 122,
-          "sha256": "464f4e0334aa4f336c9e1bb62d98359047cd7d258d17bfee09acd243a3224c9c"
+          "sha256": "61f5f28d0b5919280dba20464af1a4760076599b3f7ea7af3b1f641007c40ca5"
         }
       }
     },
@@ -28,7 +29,7 @@
         },
         "Webrtc_domain.srs": {
           "size": 351,
-          "sha256": "94fc7f445f99dc9f7f3039db60ae09b2a6d97e8dadb99bd92c4c9fd2447d2bd5"
+          "sha256": "8ad81709e1bc4db0b54e4e899bd11bf81f262092ec593924173ccd67289e12ce"
         }
       }
     },
@@ -42,7 +43,7 @@
         },
         "TelegramSG.srs": {
           "size": 57,
-          "sha256": "56d23f70a7d0c1fc5c7664200a93bd94c8ce4935c7f86cea8a3f719ff216bf73"
+          "sha256": "eeb1ebe4b45e22e4fdfc9c096a3dc6c141bf78a953852c5d90c44553c1a475b4"
         }
       }
     },
@@ -56,7 +57,7 @@
         },
         "TelegramNL.srs": {
           "size": 74,
-          "sha256": "1410d389de52b37424d7d7f95995b0bc53b8d39d7b0fe3f0657c886495f10ae5"
+          "sha256": "27cadcee2ccc04c3357ac3aaa2303472306d2b6096056a1ed0af9e04a61f67cc"
         }
       }
     }
