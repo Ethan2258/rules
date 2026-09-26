@@ -52,7 +52,7 @@
 }
 ```
 
-把 `proxy` 换成自己的出站标签；1.14 以前的版本删掉 `http_clients` 和 `http_client` 即可。
+把 `proxy` 换成自己的出站标签。SRS 始终使用最新稳定版 sing-box 的规则集格式（版本号见[产物清单](.github/rule-artifacts.json)的 `srs_version`），旧版客户端会读取失败，请保持 sing-box 为最新版。
 
 ## Egern
 
@@ -76,7 +76,7 @@ rules:
 - GitHub 繁忙时会推迟甚至跳过定时任务，实际间隔可能长达几个小时；上游变动不频繁，客户端按 3 小时拉取即可。
 - 来源：NodeSeek 跟随 MetaCubeX，WebRTC 来自 MeALiYeYe，Telegram SG/NL 来自 Kelee 并对照 Telegram 官方 CIDR 核验。
 - 规则会先规范化、去重；遇到非法记录、规则数过少、网段越界或冲突时中止更新，保留上一版。
-- SRS 由最新版 sing-box 编译后反向解码核对；[验证工作流](https://github.com/Ethan2258/rules/actions/workflows/validate.yml)检查 YAML、SRS、产物清单和 README 链接。
+- SRS 由最新稳定版 sing-box 编译，文件头标为该版本支持的最新格式（写在产物清单的 `srs_version`），再反向解码核对；[验证工作流](https://github.com/Ethan2258/rules/actions/workflows/validate.yml)检查 YAML、SRS、产物清单和 README 链接。
 
 ## 许可
 

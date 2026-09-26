@@ -168,6 +168,10 @@ def validate_artifact_manifest(egern_counts: dict[str, int], errors: list[str]) 
     tools = manifest.get("tools")
     if not isinstance(tools, dict) or not isinstance(tools.get("sing_box"), str) or not tools["sing_box"]:
         errors.append(f"{relative(MANIFEST_PATH)}: missing sing-box compiler version")
+    srs_version = manifest.get("srs_version")
+    if type(srs_version) is not int or srs_version < 2:
+        errors.append(f"{relative(MANIFEST_PATH)}: missing SRS format version")
+        srs_version = None
     rule_sets = manifest.get("rule_sets")
     if not isinstance(rule_sets, dict) or set(rule_sets) != set(EXPECTED_RULE_SETS):
         errors.append(f"{relative(MANIFEST_PATH)}: unexpected rule-set inventory")
@@ -208,6 +212,12 @@ def validate_artifact_manifest(egern_counts: dict[str, int], errors: list[str]) 
                 errors.append(f"{filename}: size does not match artifact manifest")
             if expected_hash != hashlib.sha256(data).hexdigest():
                 errors.append(f"{filename}: SHA-256 does not match artifact manifest")
+            # Every SRS is published in the latest format of the compiler that built it.
+            if filename.endswith(".srs") and srs_version and data[3:4] != bytes([srs_version]):
+                errors.append(
+                    f"{filename}: SRS format version does not match the manifest's "
+                    f"v{srs_version}"
+                )
 
     published = {path.name for pattern in ("*.srs", "*.yaml") for path in ROOT.glob(pattern)}
     unlisted = sorted(published - manifest_files)
