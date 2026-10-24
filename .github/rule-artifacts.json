@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "tools": {
-    "sing_box": "sing-box version 1.14.3"
+    "sing_box": "sing-box version 1.14.4"
   },
   "srs_version": 5,
   "rule_sets": {
